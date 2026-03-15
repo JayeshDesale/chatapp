@@ -29,6 +29,14 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/users", userRoutes);
 
 
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "ChatShip backend is live" });
+});
+
+app.get("/api/auth/status", (req, res) => {
+  res.json({ status: "ok", message: "Auth API up", routes: ["POST /api/auth/signup", "POST /api/auth/login"] });
+});
+
 app.get("/api/protected", authMiddleware, (req, res) => {
   res.json({
     message: "Protected route accessed successfully ✅",
