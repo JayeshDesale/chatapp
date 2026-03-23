@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="8cb3d613-6e31-4ec6-a1a7-69ff75470fae" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/Backend/src/config/db.js" beforeDir="false" afterPath="$PROJECT_DIR$/Backend/src/config/db.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Backend/src/controllers/authController.js" beforeDir="false" afterPath="$PROJECT_DIR$/Backend/src/controllers/authController.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Backend/src/controllers/userController.js" beforeDir="false" afterPath="$PROJECT_DIR$/Backend/src/controllers/userController.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Backend/src/server.js" beforeDir="false" afterPath="$PROJECT_DIR$/Backend/src/server.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/{" beforeDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 4
+}]]></component>
+  <component name="ProjectId" id="3B3sUdIX7z8c1Sjs3a7EqIDD9dY" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "C:/vscode/EXTRA FILES/realtime-chat-app",
+    "settings.editor.selected.configurable": "preferences.lookFeel"
+  }
+}]]></component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="8cb3d613-6e31-4ec6-a1a7-69ff75470fae" name="Changes" comment="" />
+      <created>1773729107301</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1773729107301</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

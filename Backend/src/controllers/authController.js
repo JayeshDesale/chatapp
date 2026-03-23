@@ -8,7 +8,6 @@ export const signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // check if user exists
     const [existing] = await db.query(
       "SELECT * FROM users WHERE email = ?",
       [email]
@@ -27,8 +26,8 @@ export const signup = async (req, res) => {
 
     res.json({ message: "User created successfully" });
 
-  } catch (error) {
-    console.error(error);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Signup failed" });
   }
 };
@@ -71,8 +70,8 @@ export const login = async (req, res) => {
       }
     });
 
-  } catch (error) {
-    console.error(error);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server Error" });
   }
 };

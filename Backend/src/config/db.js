@@ -15,17 +15,15 @@ const pool = mysql.createPool({
   charset: "utf8mb4"
 });
 
-// promise wrapper
 const db = pool.promise();
 
-// test connection
 (async () => {
   try {
-    const connection = await db.getConnection();
+    const conn = await db.getConnection();
     console.log("MySQL Pool Connected Successfully ✅");
-    connection.release();
+    conn.release();
   } catch (err) {
-    console.error("MySQL Pool Connection Error ❌", err);
+    console.error("MySQL Connection Error ❌", err);
   }
 })();
 

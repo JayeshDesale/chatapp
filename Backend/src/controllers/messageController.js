@@ -1,88 +1,64 @@
 import db from "../config/db.js";
 import { io, onlineUsers } from "../server.js";
 
-// SEND MESSAGE
-export const sendMessage = (req, res) => {
-  const { receiver_id, message } = req.body;
-  const sender_id = req.user.id;
+/* -------- SEND MESSAGE -------- */
 
-  if (!receiver_id || !message) {
-    return res.status(400).json({ message: "All fields are required" });
-  }
+export const sendMessage = async (req, res) => {
+  try {
+    const senderId = Number(req.user.id);
+    const { receiverId, message } = req.body;
 
-  db.query(
-    "INSERT INTO messages (sender_id, receiver_id, message, read_status) VALUES (?, ?, ?, 0)",
-    [sender_id, receiver_id, message],
-    (err, result) => {
-      if (err) {
-        console.log("sendMessage db error", err);
-        return res.status(500).json({ message: "Message send failed" });
-      }
-
-      const receiverSocket = onlineUsers[receiver_id];
-      if (receiverSocket) {
-        io.to(receiverSocket).emit("receiveMessage", {
-          sender_id,
-          receiver_id,
-          message,
-          created_at: new Date().toISOString(),
-        });
-      }
-
-      res.status(201).json({ message: "Message sent successfully" });
+    if (!receiverId || !message) {
+      return res.status(400).json({ message: "Missing data" });
     }
-  );
+
+    const [result] = await db.query(
+      "INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)",
+      [senderId, Number(receiverId), message]
+    );
+
+    const newMessage = {
+      id: result.insertId,
+      sender_id: senderId,
+      receiver_id: Number(receiverId),
+      message,
+      created_at: new Date()
+    };
+
+    // send ONLY to correct receiver
+    const receiverSocket = onlineUsers[receiverId];
+    if (receiverSocket) {
+      io.to(receiverSocket).emit("receiveMessage", newMessage);
+    }
+
+    res.json(newMessage);
+
+  } catch (err) {
+    console.error("SEND ERROR:", err);
+    res.status(500).json({ message: "Error sending message" });
+  }
 };
 
-// GET MESSAGES
-export const getMessages = (req, res) => {
-  const sender_id = req.user.id;
-  const receiver_id = req.params.userId;
+/* -------- GET MESSAGES -------- */
 
-  db.query(
-    `SELECT * FROM messages 
-     WHERE (sender_id = ? AND receiver_id = ?) 
-        OR (sender_id = ? AND receiver_id = ?)
-     ORDER BY created_at ASC`,
-    [sender_id, receiver_id, receiver_id, sender_id],
-    (err, results) => {
-      if (err) {
-        console.log(err);
-        return res.status(500).json({ message: "Fetch failed" });
-      }
+export const getMessages = async (req, res) => {
+  try {
+    const currentUserId = Number(req.user.id);
+    const otherUserId = Number(req.params.userId);
 
-      res.json(results);
-    }
-  );
-};
+    const [messages] = await db.query(
+      `SELECT * FROM messages 
+       WHERE 
+       (sender_id = ? AND receiver_id = ?)
+       OR 
+       (sender_id = ? AND receiver_id = ?)`,
+      [currentUserId, otherUserId, otherUserId, currentUserId]
+    );
 
-// MARK AS READ
-export const markMessagesRead = (req, res) => {
-  const user_id = req.user.id;
-  const sender_id = req.body.sender_id;
+    res.json(messages);
 
-  if (!sender_id) {
-    return res.status(400).json({ message: "sender_id required" });
+  } catch (err) {
+    console.error("GET ERROR:", err);
+    res.status(500).json({ message: "Error fetching messages" });
   }
-
-  db.query(
-    "UPDATE messages SET read_status = 1 WHERE sender_id = ? AND receiver_id = ?",
-    [sender_id, user_id],
-    (err, result) => {
-      if (err) {
-        console.log("markMessagesRead db error", err);
-        return res.status(500).json({ message: "Read update failed" });
-      }
-
-      const senderSocket = onlineUsers[sender_id];
-      if (senderSocket) {
-        io.to(senderSocket).emit("messageRead", {
-          fromUserId: user_id,
-          toUserId: sender_id,
-        });
-      }
-
-      res.json({ message: "Messages marked read" });
-    }
-  );
 };

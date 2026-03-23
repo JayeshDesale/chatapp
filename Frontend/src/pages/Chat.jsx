@@ -77,7 +77,7 @@ function Chat() {
         const res = await axios.get("http://localhost:5000/api/users", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setUsers(res.data);
+        setUsers(res.data.filter(u => Number(u.id) !== Number(userId)));
         const me = res.data.find((u) => Number(u.id) === Number(userId));
         if (me) setCurrentUser(me);
       } catch (err) {
@@ -144,24 +144,43 @@ function Chat() {
   };
 
   const handleSend = async () => {
-    if (!selectedUser || isSending) return;
-    const normalized = normalizeMessage(message).trim();
-    if (!normalized) return;
-    setIsSending(true);
-    try {
-      const response = await axios.post("http://localhost:5000/api/messages/send", { receiver_id: selectedUser.id, message: normalized }, { headers: { Authorization: `Bearer ${token}` } });
-      setMessages((prev) => [...prev, { sender_id: Number(userId), message: normalized, created_at: new Date().toISOString(), read: false }]);
-      setIsReadBySelected(false);
-      setMessage("");
-      setShowEmoji(false);
-      console.log("Sent", response.data);
-    } catch (err) {
-      console.error("Send failed", err.response?.data || err.message || err);
-      alert("Message send failed: " + (err.response?.data?.message || err.message || "Try again"));
-    } finally {
-      setIsSending(false);
-    }
-  };
+  if (!selectedUser || isSending) return;
+
+  const normalized = normalizeMessage(message).trim();
+  if (!normalized) return;
+
+  // 👇 ADD THIS LINE HERE
+  console.log("Sending to user:", selectedUser);
+
+  setIsSending(true);
+
+  try {
+    const response = await axios.post(
+      "http://localhost:5000/api/messages",
+      {
+        receiverId: selectedUser.id,
+        message: normalized
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender_id: Number(userId),
+        message: normalized,
+        created_at: new Date().toISOString()
+      }
+    ]);
+
+    setMessage("");
+
+  } catch (err) {
+    console.error(err);
+  } finally {
+    setIsSending(false);
+  }
+};
 
   const addEmoji = (emojiData) => {
     setMessage((prev) => prev + emojiData.emoji);
