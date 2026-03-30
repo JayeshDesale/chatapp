@@ -49,19 +49,23 @@ io.on("connection", (socket) => {
 
 /* -------- MIDDLEWARE -------- */
 
+
+import cors from "cors";
+
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: "*", // allow all (works for deployment)
+  methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
 
 app.use(express.json());
 
 /* -------- ROUTES -------- */
+/* -------- ROUTES -------- */
 
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/users", userRoutes);
-
 /* -------- TEST -------- */
 
 app.get("/", (req, res) => {
