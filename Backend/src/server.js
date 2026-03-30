@@ -47,20 +47,19 @@ io.on("connection", (socket) => {
   });
 });
 
+
+
+
 /* -------- MIDDLEWARE -------- */
 
-
-import cors from "cors";
-
 app.use(cors({
-  origin: "*", // allow all (works for deployment)
+  origin: "*",
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
 
 app.use(express.json());
 
-/* -------- ROUTES -------- */
 /* -------- ROUTES -------- */
 
 app.use("/api/auth", authRoutes);
