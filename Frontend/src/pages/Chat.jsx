@@ -72,18 +72,31 @@ function Chat() {
   useEffect(() => {
     if (!token) return;
 
-    const fetchUsers = async () => {
-      try {
-        const res = await axios.get(`${API_BASE_URL}/api/auth/login`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setUsers(res.data.filter(u => Number(u.id) !== Number(userId)));
-        const me = res.data.find((u) => Number(u.id) === Number(userId));
-        if (me) setCurrentUser(me);
-      } catch (err) {
-        console.error("Load users failed", err);
-      }
-    };
+   const fetchUsers = async () => {
+  try {
+    const res = await axios.get(`${API_BASE_URL}/api/users`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    console.log("Users from API:", res.data);
+    console.log("Logged in userId:", userId);
+
+    const filtered = res.data.filter(
+      (u) => Number(u.id) !== Number(userId)
+    );
+
+    setUsers(filtered);
+
+    const me = res.data.find(
+      (u) => Number(u.id) === Number(userId)
+    );
+
+    if (me) setCurrentUser(me);
+
+  } catch (err) {
+    console.error("Load users failed", err);
+  }
+};
     fetchUsers();
   }, [token]);
 
