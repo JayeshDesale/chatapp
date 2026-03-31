@@ -18,7 +18,7 @@ const server = http.createServer(app);
 let onlineUsers = {};
 export { onlineUsers };
 
-/* -------- CORS FIX (VERY IMPORTANT) -------- */
+/* -------- CORS -------- */
 app.use(cors({
   origin: [
     "http://localhost:5173",
@@ -40,7 +40,7 @@ app.get("/", (req, res) => {
   res.json({ message: "Backend running ✅" });
 });
 
-/* -------- SOCKET FIX -------- */
+/* -------- SOCKET -------- */
 export const io = new Server(server, {
   cors: {
     origin: [
@@ -73,36 +73,6 @@ io.on("connection", (socket) => {
 });
 
 /* -------- SERVER START -------- */
-const PORT = process.env.PORT || 5000;
-
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
-
-/* -------- MIDDLEWARE -------- */
-
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
-
-app.use(express.json());
-
-/* -------- ROUTES -------- */
-
-app.use("/api/auth", authRoutes);
-app.use("/api/messages", messageRoutes);
-app.use("/api/users", userRoutes);
-/* -------- TEST -------- */
-
-app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "Backend running ✅" });
-});
-
-/* -------- SERVER -------- */
-
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
