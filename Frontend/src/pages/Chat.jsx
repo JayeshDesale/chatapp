@@ -207,8 +207,8 @@ function Chat() {
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-indigo-950 via-slate-900 to-violet-950 text-slate-100 transition-all duration-300">
-      <div className="hidden lg:flex lg:w-80 flex-col border-r border-indigo-700/40 bg-white/10 backdrop-blur-xl shadow-xl">
+    <div className="flex flex-col lg:flex-row h-screen bg-gradient-to-br from-indigo-950 via-slate-900 to-violet-950 text-slate-100 transition-all duration-300">
+      <div className="w-full lg:w-80 flex flex-col border-r border-indigo-700/40 bg-white/10 backdrop-blur-xl shadow-xl">
         <div className="p-4 border-b border-indigo-700/30">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -268,12 +268,28 @@ function Chat() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col">
+      <div className={`${selectedUser ? "flex" : "hidden"} lg:flex flex-1 flex-col`}>
         <div className="bg-indigo-900/70 border-b border-indigo-600/50 px-4 py-3 flex items-center justify-between shadow-xl backdrop-blur-md">
-          <div>
-            <h2 className="text-base font-semibold text-white">{selectedUser ? `${currentUser?.name || "You"} ↔ ${selectedUser.name}` : "Select a chat"}</h2>
-            <p className="text-xs text-indigo-200">{currentUser ? `You are ${currentUser.name}` : "Choose a contact"}</p>
-          </div>
+
+  <div className="flex items-center gap-2">
+
+    <button
+      onClick={() => setSelectedUser(null)}
+      className="lg:hidden text-white text-xl"
+    >
+      ←
+    </button>
+
+    <div>
+      <h2 className="text-base font-semibold text-white">
+        {selectedUser ? `${currentUser?.name || "You"} ↔ ${selectedUser.name}` : "Select a chat"}
+      </h2>
+      <p className="text-xs text-indigo-200">
+        {currentUser ? `You are ${currentUser.name}` : "Choose a contact"}
+      </p>
+    </div>
+
+  </div>
           <div className="flex items-center gap-2 text-indigo-100 text-xs">
             <span className="px-2 py-1 rounded-full bg-amber-400/20 text-amber-200">Incognito for 2nd user</span>
             <button onClick={() => alert("Chat settings coming soon 👍")} className="px-2 py-1 rounded-full bg-white/10 hover:bg-white/20 transition">Settings</button>
