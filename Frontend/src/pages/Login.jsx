@@ -19,6 +19,7 @@ function Login() {
 
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("userId", res.data.user.id);
+      localStorage.setItem("userName", res.data.user.name);
       navigate("/chat");
     } catch (error) {
       alert("Login failed: " + (error.response?.data?.message || error.message));

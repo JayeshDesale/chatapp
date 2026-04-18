@@ -7,48 +7,43 @@ import { Server } from "socket.io";
 import authRoutes from "./routes/authRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
-import "./config/db.js";
+import connectDB from "./config/db.js";
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://chatapp-pi-red.vercel.app",
+].filter(Boolean);
 
-/* -------- ONLINE USERS -------- */
 let onlineUsers = {};
 export { onlineUsers };
 
-/* -------- CORS -------- */
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://chatapp-ivory-one.vercel.app"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 
 app.use(express.json());
 
-/* -------- ROUTES -------- */
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/users", userRoutes);
 
-/* -------- TEST ROUTE -------- */
 app.get("/", (req, res) => {
-  res.json({ message: "Backend running ✅" });
+  res.json({ message: "Backend running" });
 });
 
-/* -------- SOCKET -------- */
 export const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://chatapp-ivory-one.vercel.app"
-    ],
-    methods: ["GET", "POST"]
-  }
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+  },
 });
 
 io.on("connection", (socket) => {
@@ -59,10 +54,24 @@ io.on("connection", (socket) => {
     io.emit("onlineUsers", Object.keys(onlineUsers));
   });
 
+  socket.on("typing", ({ toUserId, fromUserId }) => {
+    const receiverSocket = onlineUsers[toUserId];
+    if (receiverSocket) {
+      io.to(receiverSocket).emit("typing", { fromUserId });
+    }
+  });
+
+  socket.on("messageRead", ({ toUserId, fromUserId }) => {
+    const receiverSocket = onlineUsers[toUserId];
+    if (receiverSocket) {
+      io.to(receiverSocket).emit("messageRead", { fromUserId });
+    }
+  });
+
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
 
-    for (let userId in onlineUsers) {
+    for (const userId of Object.keys(onlineUsers)) {
       if (onlineUsers[userId] === socket.id) {
         delete onlineUsers[userId];
       }
@@ -72,9 +81,10 @@ io.on("connection", (socket) => {
   });
 });
 
-/* -------- SERVER START -------- */
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+connectDB().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 });

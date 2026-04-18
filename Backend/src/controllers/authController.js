@@ -1,6 +1,6 @@
-import db from "../config/db.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import User from "../models/User.js";
 
 /* ---------------- SIGNUP ---------------- */
 
@@ -8,23 +8,31 @@ export const signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    const [existing] = await db.query(
-      "SELECT * FROM users WHERE email = ?",
-      [email]
-    );
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
 
-    if (existing.length > 0) {
+    const existing = await User.findOne({ email });
+    if (existing) {
       return res.status(400).json({ message: "User already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await db.query(
-      "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-      [name, email, hashedPassword]
-    );
+    const user = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+    });
 
-    res.json({ message: "User created successfully" });
+    res.status(201).json({
+      message: "User created successfully",
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+      },
+    });
 
   } catch (err) {
     console.error(err);
@@ -38,16 +46,10 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [rows] = await db.query(
-      "SELECT * FROM users WHERE email = ?",
-      [email]
-    );
-
-    if (rows.length === 0) {
+    const user = await User.findOne({ email });
+    if (!user) {
       return res.status(400).json({ message: "User not found" });
     }
-
-    const user = rows[0];
 
     const match = await bcrypt.compare(password, user.password);
 
@@ -56,7 +58,7 @@ export const login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id },
+      { id: user._id.toString() },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -64,7 +66,7 @@ export const login = async (req, res) => {
     res.json({
       token,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email
       }
