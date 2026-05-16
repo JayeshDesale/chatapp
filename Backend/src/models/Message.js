@@ -10,7 +10,12 @@ const messageSchema = new mongoose.Schema(
     receiver_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      default: null,
+    },
+    group_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+      default: null,
     },
     message: {
       type: String,
@@ -29,6 +34,7 @@ const messageSchema = new mongoose.Schema(
 );
 
 messageSchema.index({ sender_id: 1, receiver_id: 1, created_at: 1 });
+messageSchema.index({ group_id: 1, created_at: 1 });
 
 const Message = mongoose.model("Message", messageSchema);
 

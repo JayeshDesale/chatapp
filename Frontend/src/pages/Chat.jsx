@@ -11,12 +11,15 @@ import {
   MessageSquareReply,
   MoreVertical,
   BellOff,
+  Camera,
   Copy,
+  Image,
   LogOut,
   Moon,
   Paperclip,
   Pin,
   PinOff,
+  Plus,
   Search,
   Send,
   Settings,
@@ -43,8 +46,24 @@ const quickReplies = [
 ];
 
 const reactionOptions = ["👍", "❤️", "😂", "🔥", "👏"];
+const IMAGE_MESSAGE_PREFIX = "__CHATSHIP_IMAGE__";
+const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_STORY_IMAGE_SIZE_BYTES = 3 * 1024 * 1024;
 
 const getMessageKey = (item) => String(item.id || item.created_at || item.message);
+
+const buildImageMessage = ({ name, size, type, dataUrl, caption }) =>
+  `${IMAGE_MESSAGE_PREFIX}${JSON.stringify({ name, size, type, dataUrl, caption })}`;
+
+const parseImageMessage = (text = "") => {
+  if (!text.startsWith(IMAGE_MESSAGE_PREFIX)) return null;
+
+  try {
+    return JSON.parse(text.slice(IMAGE_MESSAGE_PREFIX.length));
+  } catch {
+    return null;
+  }
+};
 
 const parseReplyMessage = (text = "") => {
   if (!text.startsWith("Reply to ")) {
@@ -76,9 +95,12 @@ const parseReplyMessage = (text = "") => {
 
 function Chat() {
   const [users, setUsers] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [stories, setStories] = useState([]);
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [showEmoji, setShowEmoji] = useState(false);
@@ -124,6 +146,11 @@ function Chat() {
       return [];
     }
   });
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showStoryModal, setShowStoryModal] = useState(false);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [storyDraft, setStoryDraft] = useState({ image: "", caption: "", name: "" });
+  const [groupDraft, setGroupDraft] = useState({ name: "", memberIds: [] });
 
   const token = localStorage.getItem("token");
   const userId = localStorage.getItem("userId");
@@ -133,7 +160,10 @@ function Chat() {
   const typingTimerRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
+  const profileInputRef = useRef(null);
+  const storyInputRef = useRef(null);
   const selectedUserRef = useRef(null);
+  const selectedGroupRef = useRef(null);
 
   const markMessagesRead = useCallback(
     async (senderId) => {
@@ -156,6 +186,10 @@ function Chat() {
   useEffect(() => {
     selectedUserRef.current = selectedUser;
   }, [selectedUser]);
+
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
 
   useEffect(() => {
     localStorage.setItem("chatTheme", theme);
@@ -213,6 +247,15 @@ function Chat() {
       }));
     };
 
+    const handleReceiveGroupMessage = (data) => {
+      if (!data) return;
+      const activeGroup = selectedGroupRef.current;
+
+      if (activeGroup && String(data.group_id) === String(activeGroup.id)) {
+        setMessages((prev) => [...prev, data]);
+      }
+    };
+
     const handleTypingEvent = (data) => {
       const activeChat = selectedUserRef.current;
       if (activeChat && String(data.fromUserId) === String(activeChat.id)) {
@@ -239,6 +282,7 @@ function Chat() {
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("receiveGroupMessage", handleReceiveGroupMessage);
     socket.on("typing", handleTypingEvent);
     socket.on("messageRead", handleMessageRead);
     socket.on("onlineUsers", setOnlineUsers);
@@ -247,6 +291,7 @@ function Chat() {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("receiveGroupMessage", handleReceiveGroupMessage);
       socket.off("typing", handleTypingEvent);
       socket.off("messageRead", handleMessageRead);
       socket.off("onlineUsers", setOnlineUsers);
@@ -258,21 +303,30 @@ function Chat() {
     if (!token) return;
 
     if (savedUserName) {
-      setCurrentUser({ id: userId, name: savedUserName });
+      setCurrentUser({
+        id: userId,
+        name: savedUserName,
+        profilePic: localStorage.getItem("profilePic") || "",
+      });
     }
 
-    const fetchUsers = async () => {
+    const fetchInitialData = async () => {
       try {
-        const res = await axios.get(`${API_BASE_URL}/api/users`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setUsers(res.data);
+        const headers = { Authorization: `Bearer ${token}` };
+        const [usersRes, groupsRes, storiesRes] = await Promise.all([
+          axios.get(`${API_BASE_URL}/api/users`, { headers }),
+          axios.get(`${API_BASE_URL}/api/groups`, { headers }),
+          axios.get(`${API_BASE_URL}/api/stories`, { headers }),
+        ]);
+        setUsers(usersRes.data);
+        setGroups(groupsRes.data);
+        setStories(storiesRes.data);
       } catch (err) {
-        console.error("Load users failed", err);
+        console.error("Load initial chat data failed", err);
       }
     };
 
-    fetchUsers();
+    fetchInitialData();
   }, [savedUserName, token, userId]);
 
   useEffect(() => {
@@ -289,6 +343,8 @@ function Chat() {
       contactUsers.filter((user) => onlineUsers.includes(String(user.id))).length,
     [contactUsers, onlineUsers]
   );
+
+  const selectedChat = selectedGroup || selectedUser;
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -324,14 +380,18 @@ function Chat() {
   }, [hiddenMessageIds, messageSearch, messages]);
 
   const selectedStarredCount = useMemo(() => {
-    if (!selectedUser) return 0;
+    if (!selectedChat) return 0;
     return Object.values(starredMessages).filter(
-      (item) => String(item.chatId) === String(selectedUser.id)
+      (item) => String(item.chatId) === String(selectedChat.id)
     ).length;
-  }, [selectedUser, starredMessages]);
+  }, [selectedChat, starredMessages]);
 
   const selectedSharedItemsCount = useMemo(
-    () => messages.filter((item) => String(item.message || "").includes("Attachment:")).length,
+    () =>
+      messages.filter((item) => {
+        const value = String(item.message || "");
+        return value.includes("Attachment:") || value.includes(IMAGE_MESSAGE_PREFIX);
+      }).length,
     [messages]
   );
 
@@ -373,6 +433,7 @@ function Chat() {
 
   const loadMessages = async (user) => {
     setSelectedUser(user);
+    setSelectedGroup(null);
     setIsReadBySelected(false);
     setShowEmoji(false);
     setMessageSearch("");
@@ -403,6 +464,29 @@ function Chat() {
     }
   };
 
+  const loadGroupMessages = async (group) => {
+    setSelectedGroup(group);
+    setSelectedUser(null);
+    setIsReadBySelected(false);
+    setShowEmoji(false);
+    setMessageSearch("");
+    setHiddenMessageIds([]);
+    setPendingAttachment(null);
+    setReplyTo(null);
+    setShowInfoPanel(false);
+    setMessage(localStorage.getItem(`draft:group:${group.id}`) || "");
+
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/messages/group/${group.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMessages(res.data);
+    } catch (err) {
+      console.error("Load group messages failed", err);
+      setMessages([]);
+    }
+  };
+
   const normalizeMessage = (value) => {
     if (typeof value === "string") return value;
     if (value == null) return "";
@@ -420,24 +504,32 @@ function Chat() {
     if (selectedUser) {
       localStorage.setItem(`draft:${selectedUser.id}`, value);
     }
+    if (selectedGroup) {
+      localStorage.setItem(`draft:group:${selectedGroup.id}`, value);
+    }
   };
 
   const handleTyping = () => {
-    if (!selectedUser || !userId) return;
+    if (!selectedUser || selectedGroup || !userId) return;
     socket.emit("typing", { toUserId: selectedUser.id, fromUserId: userId });
   };
 
   const handleSend = async () => {
-    if (!selectedUser || isSending) return;
+    if ((!selectedUser && !selectedGroup) || isSending) return;
 
     const normalized = normalizeMessage(message).trim();
-    const attachmentLine = pendingAttachment
-      ? `\n\nAttachment: ${pendingAttachment.name} (${pendingAttachment.size})`
-      : "";
     const replyLine = replyTo
       ? `Reply to ${replyTo.senderName}: ${replyTo.preview}\n---\n`
       : "";
-    const body = `${replyLine}${normalized}${attachmentLine}`.trim();
+    const imageMessage =
+      pendingAttachment?.kind === "image"
+        ? buildImageMessage({ ...pendingAttachment, caption: normalized })
+        : "";
+    const attachmentLine =
+      pendingAttachment && pendingAttachment.kind !== "image"
+        ? `\n\nAttachment: ${pendingAttachment.name} (${pendingAttachment.size})`
+        : "";
+    const body = `${replyLine}${imageMessage || normalized}${attachmentLine}`.trim();
     if (!body) return;
 
     setIsSending(true);
@@ -446,7 +538,8 @@ function Chat() {
       const response = await axios.post(
         `${API_BASE_URL}/api/messages`,
         {
-          receiverId: selectedUser.id,
+          receiverId: selectedUser?.id,
+          groupId: selectedGroup?.id,
           message: body,
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -456,7 +549,8 @@ function Chat() {
       setMessage("");
       setPendingAttachment(null);
       setReplyTo(null);
-      localStorage.removeItem(`draft:${selectedUser.id}`);
+      if (selectedUser) localStorage.removeItem(`draft:${selectedUser.id}`);
+      if (selectedGroup) localStorage.removeItem(`draft:group:${selectedGroup.id}`);
       setIsReadBySelected(false);
     } catch (err) {
       console.error(err);
@@ -474,7 +568,30 @@ function Chat() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (file.type.startsWith("image/")) {
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+        alert("Please choose an image under 2 MB.");
+        event.target.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        setPendingAttachment({
+          kind: "image",
+          name: file.name,
+          size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+          type: file.type,
+          dataUrl: reader.result,
+        });
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+      return;
+    }
+
     setPendingAttachment({
+      kind: "file",
       name: file.name,
       size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
       type: file.type || "file",
@@ -497,7 +614,7 @@ function Chat() {
   };
 
   const toggleStar = (item) => {
-    if (!selectedUser) return;
+    if (!selectedChat) return;
     const key = getMessageKey(item);
     setStarredMessages((prev) => {
       if (prev[key]) {
@@ -509,8 +626,8 @@ function Chat() {
       return {
         ...prev,
         [key]: {
-          chatId: selectedUser.id,
-          chatName: selectedUser.name,
+          chatId: selectedChat.id,
+          chatName: selectedChat.name,
           message: item.message,
           created_at: item.created_at,
         },
@@ -526,12 +643,107 @@ function Chat() {
     }));
   };
 
-  const beginReply = (item, mine) => {
+  const beginReply = (item, mine, senderName) => {
     const parsed = parseReplyMessage(item.message);
+    const image = parseImageMessage(parsed.body);
     setReplyTo({
-      senderName: mine ? "You" : selectedUser?.name || "Contact",
-      preview: parsed.body.replace(/\s+/g, " ").slice(0, 90),
+      senderName: mine ? "You" : senderName || selectedUser?.name || "Contact",
+      preview: image ? `Photo: ${image.caption || image.name}` : parsed.body.replace(/\s+/g, " ").slice(0, 90),
     });
+  };
+
+  const readImageFile = (file, limitBytes, onLoad) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please select an image file.");
+      return;
+    }
+    if (file.size > limitBytes) {
+      alert(`Please choose an image under ${Math.round(limitBytes / 1024 / 1024)} MB.`);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => onLoad(reader.result, file);
+    reader.readAsDataURL(file);
+  };
+
+  const updateProfilePicture = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    readImageFile(file, MAX_STORY_IMAGE_SIZE_BYTES, async (dataUrl) => {
+      try {
+        const res = await axios.put(
+          `${API_BASE_URL}/api/users/profile`,
+          { profilePic: dataUrl },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setCurrentUser(res.data);
+        localStorage.setItem("profilePic", res.data.profilePic || "");
+        setShowProfileModal(false);
+      } catch (err) {
+        console.error("Profile update failed", err);
+        alert("Profile picture update failed");
+      }
+    });
+  };
+
+  const selectStoryImage = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    readImageFile(file, MAX_STORY_IMAGE_SIZE_BYTES, (dataUrl, selectedFile) => {
+      setStoryDraft((prev) => ({
+        ...prev,
+        image: dataUrl,
+        name: selectedFile.name,
+      }));
+    });
+  };
+
+  const createStory = async () => {
+    if (!storyDraft.image) return;
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/api/stories`,
+        { image: storyDraft.image, caption: storyDraft.caption },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setStories((prev) => [res.data, ...prev]);
+      setStoryDraft({ image: "", caption: "", name: "" });
+      setShowStoryModal(false);
+    } catch (err) {
+      console.error("Story upload failed", err);
+      alert("Story upload failed");
+    }
+  };
+
+  const toggleGroupMember = (memberId) => {
+    setGroupDraft((prev) => ({
+      ...prev,
+      memberIds: prev.memberIds.includes(memberId)
+        ? prev.memberIds.filter((id) => id !== memberId)
+        : [...prev.memberIds, memberId],
+    }));
+  };
+
+  const createGroup = async () => {
+    if (!groupDraft.name.trim() || !groupDraft.memberIds.length) return;
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/api/groups`,
+        { name: groupDraft.name, memberIds: groupDraft.memberIds },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setGroups((prev) => [res.data, ...prev]);
+      setGroupDraft({ name: "", memberIds: [] });
+      setShowGroupModal(false);
+      loadGroupMessages(res.data);
+    } catch (err) {
+      console.error("Group create failed", err);
+      alert("Group create failed");
+    }
   };
 
   const hideMessage = (item) => {
@@ -557,6 +769,7 @@ function Chat() {
 
   const activeIsOnline = selectedUser && onlineUsers.includes(String(selectedUser.id));
   const selectedMuted = selectedUser && mutedUsers.includes(String(selectedUser.id));
+  const selectedMembers = selectedGroup?.members || [];
   const conversationBg =
     wallpaper === "pattern"
       ? "bg-[radial-gradient(circle_at_1px_1px,rgba(34,211,238,0.22)_1px,transparent_0)] bg-[length:22px_22px]"
@@ -567,7 +780,7 @@ function Chat() {
       <div className="flex h-full">
         <aside
           className={`${
-            selectedUser ? "hidden lg:flex" : "flex"
+            selectedChat ? "hidden lg:flex" : "flex"
           } w-full lg:w-[380px] flex-col border-r ${themeClasses.side}`}
         >
           <div className="border-b border-inherit p-4">
@@ -627,9 +840,52 @@ function Chat() {
                 </button>
               ))}
             </div>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setShowStoryModal(true)}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${themeClasses.panel} ${themeClasses.hover}`}
+              >
+                <Image size={15} /> Story
+              </button>
+              <button
+                onClick={() => setShowGroupModal(true)}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${themeClasses.panel} ${themeClasses.hover}`}
+              >
+                <Plus size={15} /> Group
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
+            {stories.length ? (
+              <div className="mb-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className={`text-xs font-semibold uppercase tracking-[0.16em] ${themeClasses.muted}`}>Stories</p>
+                  <span className={`text-xs ${themeClasses.muted}`}>24h</span>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {stories.map((story) => (
+                    <button
+                      key={story.id}
+                      onClick={() => window.open(story.image, "_blank")}
+                      className="shrink-0 text-left"
+                      title={story.caption || story.user_name}
+                    >
+                      <div className="rounded-2xl bg-gradient-to-br from-cyan-400 to-emerald-400 p-0.5">
+                        <img
+                          src={story.image}
+                          alt={story.caption || story.user_name}
+                          className="h-16 w-16 rounded-[14px] object-cover"
+                        />
+                      </div>
+                      <p className="mt-1 max-w-16 truncate text-[11px]">{story.user_name}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="mb-3 grid grid-cols-3 gap-2">
               <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
                 <p className={`text-xs ${themeClasses.muted}`}>Contacts</p>
@@ -646,6 +902,36 @@ function Chat() {
                 </p>
               </div>
             </div>
+
+            {groups.length ? (
+              <div className="mb-4 space-y-2">
+                <p className={`px-1 text-xs font-semibold uppercase tracking-[0.16em] ${themeClasses.muted}`}>Groups</p>
+                {groups.map((group) => {
+                  const active = selectedGroup?.id === group.id;
+                  return (
+                    <button
+                      key={group.id}
+                      onClick={() => loadGroupMessages(group)}
+                      className={`w-full rounded-2xl border p-3 text-left ${
+                        active ? "border-cyan-400 bg-cyan-500/15" : `${themeClasses.panel} ${themeClasses.hover}`
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-slate-950 text-white">
+                          <UsersRound size={20} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold">{group.name}</p>
+                          <p className={`truncate text-xs ${themeClasses.muted}`}>
+                            {group.members?.length || 0} members
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               {filteredUsers.length ? (
@@ -669,7 +955,11 @@ function Chat() {
                       <div className="flex items-center gap-3">
                         <div className="relative">
                           <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-emerald-400 text-sm font-black text-slate-950">
-                            {initials(user.name)}
+                            {user.profilePic ? (
+                              <img src={user.profilePic} alt={user.name} className="h-full w-full rounded-2xl object-cover" />
+                            ) : (
+                              initials(user.name)
+                            )}
                           </div>
                           <span
                             className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 ${
@@ -707,9 +997,17 @@ function Chat() {
           <div className="border-t border-inherit p-3">
             <div className={`flex items-center justify-between rounded-2xl border p-3 ${themeClasses.panel}`}>
               <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-900 text-white">
-                  <UserRound size={18} />
-                </div>
+                <button
+                  title="Update profile picture"
+                  onClick={() => setShowProfileModal(true)}
+                  className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl bg-slate-900 text-white"
+                >
+                  {currentUser?.profilePic ? (
+                    <img src={currentUser.profilePic} alt={currentUser.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <UserRound size={18} />
+                  )}
+                </button>
                 <div>
                   <p className="text-sm font-semibold">{currentUser?.name || "You"}</p>
                   <p className={`flex items-center gap-1 text-xs ${themeClasses.muted}`}>
@@ -723,26 +1021,37 @@ function Chat() {
           </div>
         </aside>
 
-        <main className={`${selectedUser ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col ${themeClasses.main}`}>
-          {selectedUser ? (
+        <main className={`${selectedChat ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col ${themeClasses.main}`}>
+          {selectedChat ? (
             <>
               <header className={`border-b px-4 py-3 ${themeClasses.side}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <button
                       title="Back"
-                      onClick={() => setSelectedUser(null)}
+                      onClick={() => {
+                        setSelectedUser(null);
+                        setSelectedGroup(null);
+                      }}
                       className={`grid h-10 w-10 place-items-center rounded-xl border lg:hidden ${themeClasses.panel}`}
                     >
                       <ArrowLeft size={18} />
                     </button>
                     <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 to-emerald-400 text-sm font-black text-slate-950">
-                      {initials(selectedUser.name)}
+                      {selectedGroup ? (
+                        <UsersRound size={20} />
+                      ) : selectedUser.profilePic ? (
+                        <img src={selectedUser.profilePic} alt={selectedUser.name} className="h-full w-full rounded-2xl object-cover" />
+                      ) : (
+                        initials(selectedUser.name)
+                      )}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="truncate text-base font-bold">{selectedUser.name}</h2>
+                      <h2 className="truncate text-base font-bold">{selectedChat.name}</h2>
                       <p className={`text-xs ${themeClasses.muted}`}>
-                        {activeIsOnline ? "Online" : "Offline"} {isTyping ? "- typing..." : ""}
+                        {selectedGroup
+                          ? `${selectedMembers.length} members`
+                          : `${activeIsOnline ? "Online" : "Offline"} ${isTyping ? "- typing..." : ""}`}
                       </p>
                     </div>
                   </div>
@@ -750,17 +1059,17 @@ function Chat() {
                   <div className="flex items-center gap-2">
                     <button
                       title={selectedMuted ? "Unmute chat" : "Mute chat"}
-                      onClick={() => toggleMute(selectedUser.id)}
+                      onClick={() => selectedUser && toggleMute(selectedUser.id)}
                       className={`grid h-10 w-10 place-items-center rounded-xl border ${themeClasses.panel} ${themeClasses.hover}`}
                     >
                       <BellOff size={18} className={selectedMuted ? "text-cyan-400" : ""} />
                     </button>
                     <button
                       title="Pin contact"
-                      onClick={() => togglePin(selectedUser.id)}
+                      onClick={() => selectedUser && togglePin(selectedUser.id)}
                       className={`grid h-10 w-10 place-items-center rounded-xl border ${themeClasses.panel} ${themeClasses.hover}`}
                     >
-                      {pinnedUsers.includes(String(selectedUser.id)) ? <PinOff size={18} /> : <Pin size={18} />}
+                      {selectedUser && pinnedUsers.includes(String(selectedUser.id)) ? <PinOff size={18} /> : <Pin size={18} />}
                     </button>
                     <button
                       title="Chat info"
@@ -797,7 +1106,9 @@ function Chat() {
                   <div className="mx-auto grid max-w-4xl gap-3 md:grid-cols-4">
                     <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
                       <p className={`text-xs ${themeClasses.muted}`}>Status</p>
-                      <p className="mt-1 text-sm font-bold">{activeIsOnline ? "Online" : "Offline"}</p>
+                      <p className="mt-1 text-sm font-bold">
+                        {selectedGroup ? "Group chat" : activeIsOnline ? "Online" : "Offline"}
+                      </p>
                     </div>
                     <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
                       <p className={`text-xs ${themeClasses.muted}`}>Starred</p>
@@ -819,7 +1130,7 @@ function Chat() {
               )}
 
               <section className={`flex-1 overflow-y-auto p-4 ${conversationBg}`}>
-                <div className="mx-auto flex max-w-4xl flex-col gap-3">
+                <div className="flex w-full flex-col gap-3 px-0 md:px-6">
                   {visibleMessages.length ? (
                     visibleMessages.map((item, index) => {
                       const mine = String(item.sender_id) === String(userId);
@@ -827,16 +1138,20 @@ function Chat() {
                       const readStatus = mine ? (isRead ? "Seen" : "Sent") : "";
                       const messageKey = getMessageKey(item);
                       const parsed = parseReplyMessage(item.message);
+                      const image = parseImageMessage(parsed.body);
                       const reaction = messageReactions[messageKey];
                       const isStarred = Boolean(starredMessages[messageKey]);
+                      const senderName = selectedGroup
+                        ? selectedMembers.find((member) => String(member.id) === String(item.sender_id))?.name || "Member"
+                        : selectedUser?.name || "Contact";
 
                       return (
                         <div
                           key={`${index}-${item.id || item.created_at || index}`}
-                          className={`group flex ${mine ? "justify-end" : "justify-start"}`}
+                          className={`group flex w-full ${mine ? "justify-end" : "justify-start"}`}
                         >
                           <div
-                            className={`max-w-[82%] rounded-2xl px-4 py-3 shadow-sm md:max-w-[68%] ${
+                            className={`max-w-[78%] rounded-2xl px-4 py-3 shadow-sm md:max-w-[58%] ${
                               mine
                                 ? "bg-cyan-500 text-slate-950"
                                 : theme === "dark"
@@ -844,6 +1159,9 @@ function Chat() {
                                   : "bg-white text-slate-900"
                             }`}
                           >
+                            {selectedGroup && !mine && (
+                              <p className="mb-1 text-xs font-bold opacity-75">{senderName}</p>
+                            )}
                             {parsed.replyMeta && (
                               <div
                                 className={`mb-2 rounded-xl border-l-4 px-3 py-2 text-xs ${
@@ -856,7 +1174,22 @@ function Chat() {
                                 <p className="mt-0.5 line-clamp-2 opacity-80">{parsed.replyMeta.text}</p>
                               </div>
                             )}
-                            <div className="whitespace-pre-wrap break-words text-sm leading-6">{parsed.body}</div>
+                            {image ? (
+                              <div className="space-y-2">
+                                <img
+                                  src={image.dataUrl}
+                                  alt={image.name || "Shared image"}
+                                  className="max-h-[360px] w-full rounded-xl object-cover"
+                                />
+                                {image.caption && (
+                                  <div className="whitespace-pre-wrap break-words text-sm leading-6">
+                                    {image.caption}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="whitespace-pre-wrap break-words text-sm leading-6">{parsed.body}</div>
+                            )}
                             {(reaction || isStarred) && (
                               <div className="mt-2 flex items-center gap-1">
                                 {reaction && (
@@ -873,7 +1206,7 @@ function Chat() {
                               <span>{formatTime(item.created_at)}</span>
                               <div className="flex items-center gap-2">
                                 {mine && <span>{readStatus}</span>}
-                                <button title="Reply" onClick={() => beginReply(item, mine)}>
+                                <button title="Reply" onClick={() => beginReply(item, mine, senderName)}>
                                   <MessageSquareReply size={13} />
                                 </button>
                                 <button title="Star message" onClick={() => toggleStar(item)}>
@@ -952,10 +1285,19 @@ function Chat() {
                   )}
 
                   {pendingAttachment && (
-                    <div className={`mb-2 flex items-center justify-between rounded-2xl border px-3 py-2 text-sm ${themeClasses.panel}`}>
-                      <span className="truncate">
-                        Attached: {pendingAttachment.name} ({pendingAttachment.size})
-                      </span>
+                    <div className={`mb-2 flex items-center justify-between gap-3 rounded-2xl border px-3 py-2 text-sm ${themeClasses.panel}`}>
+                      <div className="flex min-w-0 items-center gap-3">
+                        {pendingAttachment.kind === "image" && (
+                          <img
+                            src={pendingAttachment.dataUrl}
+                            alt={pendingAttachment.name}
+                            className="h-14 w-14 rounded-xl object-cover"
+                          />
+                        )}
+                        <span className="truncate">
+                          {pendingAttachment.kind === "image" ? "Photo ready" : "Attached"}: {pendingAttachment.name} ({pendingAttachment.size})
+                        </span>
+                      </div>
                       <button title="Remove attachment" onClick={() => setPendingAttachment(null)}>
                         <X size={16} />
                       </button>
@@ -963,7 +1305,7 @@ function Chat() {
                   )}
 
                   <div className={`relative flex items-center gap-2 rounded-2xl border p-2 ${themeClasses.panel}`}>
-                    <input ref={fileInputRef} type="file" className="hidden" onChange={handleAttach} />
+                    <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.txt" className="hidden" onChange={handleAttach} />
                     <button
                       title="Attach file"
                       onClick={() => fileInputRef.current?.click()}
@@ -1026,6 +1368,117 @@ function Chat() {
           )}
         </main>
       </div>
+
+      {showProfileModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+          <div className={`w-full max-w-sm rounded-3xl border p-5 ${themeClasses.side}`}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold">Profile Picture</h3>
+              <button onClick={() => setShowProfileModal(false)} title="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              <div className="grid h-28 w-28 place-items-center overflow-hidden rounded-3xl bg-slate-900 text-white">
+                {currentUser?.profilePic ? (
+                  <img src={currentUser.profilePic} alt={currentUser.name} className="h-full w-full object-cover" />
+                ) : (
+                  <UserRound size={34} />
+                )}
+              </div>
+              <input ref={profileInputRef} type="file" accept="image/*" className="hidden" onChange={updateProfilePicture} />
+              <button
+                onClick={() => profileInputRef.current?.click()}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-500 px-4 py-3 font-bold text-slate-950"
+              >
+                <Camera size={18} /> Upload Photo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStoryModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+          <div className={`w-full max-w-md rounded-3xl border p-5 ${themeClasses.side}`}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold">Post Story</h3>
+              <button onClick={() => setShowStoryModal(false)} title="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <input ref={storyInputRef} type="file" accept="image/*" className="hidden" onChange={selectStoryImage} />
+            <button
+              onClick={() => storyInputRef.current?.click()}
+              className={`mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 ${themeClasses.panel} ${themeClasses.hover}`}
+            >
+              <Image size={18} /> Browse Image
+            </button>
+            {storyDraft.image && (
+              <img src={storyDraft.image} alt={storyDraft.name} className="mb-3 max-h-72 w-full rounded-2xl object-cover" />
+            )}
+            <textarea
+              value={storyDraft.caption}
+              onChange={(e) => setStoryDraft((prev) => ({ ...prev, caption: e.target.value }))}
+              placeholder="Add a caption"
+              rows={3}
+              className={`mb-3 w-full resize-none rounded-2xl border px-3 py-2 text-sm outline-none ${themeClasses.field}`}
+            />
+            <button
+              disabled={!storyDraft.image}
+              onClick={createStory}
+              className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-bold text-slate-950 disabled:opacity-60"
+            >
+              Post Story
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showGroupModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+          <div className={`w-full max-w-md rounded-3xl border p-5 ${themeClasses.side}`}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold">Create Group</h3>
+              <button onClick={() => setShowGroupModal(false)} title="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <input
+              value={groupDraft.name}
+              onChange={(e) => setGroupDraft((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="Group name"
+              className={`mb-3 w-full rounded-2xl border px-3 py-2 text-sm outline-none ${themeClasses.field}`}
+            />
+            <div className="mb-3 max-h-64 space-y-2 overflow-y-auto">
+              {contactUsers.map((user) => (
+                <label key={user.id} className={`flex cursor-pointer items-center gap-3 rounded-2xl border p-3 ${themeClasses.panel}`}>
+                  <input
+                    type="checkbox"
+                    checked={groupDraft.memberIds.includes(user.id)}
+                    onChange={() => toggleGroupMember(user.id)}
+                  />
+                  <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-xl bg-cyan-500 text-sm font-bold text-slate-950">
+                    {user.profilePic ? (
+                      <img src={user.profilePic} alt={user.name} className="h-full w-full object-cover" />
+                    ) : (
+                      initials(user.name)
+                    )}
+                  </div>
+                  <span className="font-semibold">{user.name}</span>
+                </label>
+              ))}
+            </div>
+            <button
+              disabled={!groupDraft.name.trim() || !groupDraft.memberIds.length}
+              onClick={createGroup}
+              className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-bold text-slate-950 disabled:opacity-60"
+            >
+              Create Group
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

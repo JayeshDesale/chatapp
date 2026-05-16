@@ -2,6 +2,7 @@ import express from "express";
 import {
   sendMessage,
   getMessages,
+  getGroupMessages,
   markMessagesRead,
 } from "../controllers/messageController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
@@ -12,6 +13,8 @@ const router = express.Router();
 router.post("/", authMiddleware, sendMessage);
 
 router.post("/read", authMiddleware, markMessagesRead);
+
+router.get("/group/:groupId", authMiddleware, getGroupMessages);
 
 // get messages with specific user
 router.get("/:userId", authMiddleware, getMessages);

@@ -31,6 +31,7 @@ export const signup = async (req, res) => {
         id: user._id.toString(),
         name: user.name,
         email: user.email,
+        profilePic: user.profilePic || "",
       },
     });
 
@@ -68,7 +69,8 @@ export const login = async (req, res) => {
       user: {
         id: user._id.toString(),
         name: user.name,
-        email: user.email
+        email: user.email,
+        profilePic: user.profilePic || "",
       }
     });
 
