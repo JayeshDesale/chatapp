@@ -7,6 +7,10 @@ import {
   ArrowLeft,
   Check,
   CheckCheck,
+  Info,
+  MessageSquareReply,
+  MoreVertical,
+  BellOff,
   Copy,
   LogOut,
   Moon,
@@ -17,6 +21,7 @@ import {
   Send,
   Settings,
   Smile,
+  Star,
   Sun,
   Trash2,
   UserRound,
@@ -36,6 +41,38 @@ const quickReplies = [
   "Can we discuss this today?",
   "Thanks for the update.",
 ];
+
+const reactionOptions = ["👍", "❤️", "😂", "🔥", "👏"];
+
+const getMessageKey = (item) => String(item.id || item.created_at || item.message);
+
+const parseReplyMessage = (text = "") => {
+  if (!text.startsWith("Reply to ")) {
+    return { replyMeta: null, body: text };
+  }
+
+  const separator = "\n---\n";
+  const separatorIndex = text.indexOf(separator);
+  if (separatorIndex === -1) {
+    return { replyMeta: null, body: text };
+  }
+
+  const header = text.slice(0, separatorIndex);
+  const body = text.slice(separatorIndex + separator.length);
+  const match = header.match(/^Reply to (.*?): (.*)$/);
+
+  if (!match) {
+    return { replyMeta: null, body: text };
+  }
+
+  return {
+    replyMeta: {
+      name: match[1],
+      text: match[2],
+    },
+    body,
+  };
+};
 
 function Chat() {
   const [users, setUsers] = useState([]);
@@ -63,6 +100,30 @@ function Chat() {
   const [unreadByUser, setUnreadByUser] = useState({});
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState([]);
+  const [replyTo, setReplyTo] = useState(null);
+  const [showInfoPanel, setShowInfoPanel] = useState(false);
+  const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("chatWallpaper") || "plain");
+  const [starredMessages, setStarredMessages] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("starredMessages") || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [messageReactions, setMessageReactions] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("messageReactions") || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [mutedUsers, setMutedUsers] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("mutedUsers") || "[]");
+    } catch {
+      return [];
+    }
+  });
 
   const token = localStorage.getItem("token");
   const userId = localStorage.getItem("userId");
@@ -103,6 +164,22 @@ function Chat() {
   useEffect(() => {
     localStorage.setItem("pinnedUsers", JSON.stringify(pinnedUsers));
   }, [pinnedUsers]);
+
+  useEffect(() => {
+    localStorage.setItem("starredMessages", JSON.stringify(starredMessages));
+  }, [starredMessages]);
+
+  useEffect(() => {
+    localStorage.setItem("messageReactions", JSON.stringify(messageReactions));
+  }, [messageReactions]);
+
+  useEffect(() => {
+    localStorage.setItem("mutedUsers", JSON.stringify(mutedUsers));
+  }, [mutedUsers]);
+
+  useEffect(() => {
+    localStorage.setItem("chatWallpaper", wallpaper);
+  }, [wallpaper]);
 
   useEffect(() => {
     if (!token || !userId) {
@@ -202,10 +279,21 @@ function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, selectedUser, messageSearch]);
 
+  const contactUsers = useMemo(
+    () => users.filter((user) => String(user.id) !== String(userId)),
+    [userId, users]
+  );
+
+  const contactOnlineCount = useMemo(
+    () =>
+      contactUsers.filter((user) => onlineUsers.includes(String(user.id))).length,
+    [contactUsers, onlineUsers]
+  );
+
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return users
+    return contactUsers
       .filter((user) => {
         const matchesSearch = user.name.toLowerCase().includes(query);
         const isOnline = onlineUsers.includes(String(user.id));
@@ -223,7 +311,7 @@ function Chat() {
         if (aPinned !== bPinned) return aPinned ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
-  }, [activeFilter, onlineUsers, pinnedUsers, search, unreadByUser, users]);
+  }, [activeFilter, contactUsers, onlineUsers, pinnedUsers, search, unreadByUser]);
 
   const visibleMessages = useMemo(() => {
     const query = messageSearch.trim().toLowerCase();
@@ -234,6 +322,18 @@ function Chat() {
       return String(item.message || "").toLowerCase().includes(query);
     });
   }, [hiddenMessageIds, messageSearch, messages]);
+
+  const selectedStarredCount = useMemo(() => {
+    if (!selectedUser) return 0;
+    return Object.values(starredMessages).filter(
+      (item) => String(item.chatId) === String(selectedUser.id)
+    ).length;
+  }, [selectedUser, starredMessages]);
+
+  const selectedSharedItemsCount = useMemo(
+    () => messages.filter((item) => String(item.message || "").includes("Attachment:")).length,
+    [messages]
+  );
 
   const themeClasses =
     theme === "dark"
@@ -278,6 +378,8 @@ function Chat() {
     setMessageSearch("");
     setHiddenMessageIds([]);
     setPendingAttachment(null);
+    setReplyTo(null);
+    setShowInfoPanel(false);
     setMessage(localStorage.getItem(`draft:${user.id}`) || "");
 
     try {
@@ -332,7 +434,10 @@ function Chat() {
     const attachmentLine = pendingAttachment
       ? `\n\nAttachment: ${pendingAttachment.name} (${pendingAttachment.size})`
       : "";
-    const body = `${normalized}${attachmentLine}`.trim();
+    const replyLine = replyTo
+      ? `Reply to ${replyTo.senderName}: ${replyTo.preview}\n---\n`
+      : "";
+    const body = `${replyLine}${normalized}${attachmentLine}`.trim();
     if (!body) return;
 
     setIsSending(true);
@@ -350,6 +455,7 @@ function Chat() {
       setMessages((prev) => [...prev, response.data]);
       setMessage("");
       setPendingAttachment(null);
+      setReplyTo(null);
       localStorage.removeItem(`draft:${selectedUser.id}`);
       setIsReadBySelected(false);
     } catch (err) {
@@ -383,6 +489,51 @@ function Chat() {
     );
   };
 
+  const toggleMute = (contactId) => {
+    const id = String(contactId);
+    setMutedUsers((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleStar = (item) => {
+    if (!selectedUser) return;
+    const key = getMessageKey(item);
+    setStarredMessages((prev) => {
+      if (prev[key]) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+
+      return {
+        ...prev,
+        [key]: {
+          chatId: selectedUser.id,
+          chatName: selectedUser.name,
+          message: item.message,
+          created_at: item.created_at,
+        },
+      };
+    });
+  };
+
+  const setReaction = (item, reaction) => {
+    const key = getMessageKey(item);
+    setMessageReactions((prev) => ({
+      ...prev,
+      [key]: prev[key] === reaction ? "" : reaction,
+    }));
+  };
+
+  const beginReply = (item, mine) => {
+    const parsed = parseReplyMessage(item.message);
+    setReplyTo({
+      senderName: mine ? "You" : selectedUser?.name || "Contact",
+      preview: parsed.body.replace(/\s+/g, " ").slice(0, 90),
+    });
+  };
+
   const hideMessage = (item) => {
     const key = item.id || item.created_at || item.message;
     setHiddenMessageIds((prev) => [...prev, String(key)]);
@@ -405,6 +556,11 @@ function Chat() {
   };
 
   const activeIsOnline = selectedUser && onlineUsers.includes(String(selectedUser.id));
+  const selectedMuted = selectedUser && mutedUsers.includes(String(selectedUser.id));
+  const conversationBg =
+    wallpaper === "pattern"
+      ? "bg-[radial-gradient(circle_at_1px_1px,rgba(34,211,238,0.22)_1px,transparent_0)] bg-[length:22px_22px]"
+      : "";
 
   return (
     <div className={`h-screen overflow-hidden ${themeClasses.shell}`}>
@@ -477,11 +633,11 @@ function Chat() {
             <div className="mb-3 grid grid-cols-3 gap-2">
               <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
                 <p className={`text-xs ${themeClasses.muted}`}>Contacts</p>
-                <p className="text-lg font-bold">{users.length}</p>
+                <p className="text-lg font-bold">{contactUsers.length}</p>
               </div>
               <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
                 <p className={`text-xs ${themeClasses.muted}`}>Online</p>
-                <p className="text-lg font-bold">{onlineUsers.length}</p>
+                <p className="text-lg font-bold">{contactOnlineCount}</p>
               </div>
               <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
                 <p className={`text-xs ${themeClasses.muted}`}>Unread</p>
@@ -497,6 +653,7 @@ function Chat() {
                   const isOnline = onlineUsers.includes(String(user.id));
                   const active = selectedUser?.id === user.id;
                   const isPinned = pinnedUsers.includes(String(user.id));
+                  const isMuted = mutedUsers.includes(String(user.id));
                   const unread = unreadByUser[user.id] || 0;
 
                   return (
@@ -524,6 +681,7 @@ function Chat() {
                           <div className="flex items-center gap-2">
                             <p className="truncate font-semibold">{user.name}</p>
                             {isPinned && <Pin size={13} className="text-cyan-400" />}
+                            {isMuted && <BellOff size={13} className={themeClasses.muted} />}
                           </div>
                           <p className={`truncate text-xs ${themeClasses.muted}`}>
                             {isOnline ? "Online now" : "Offline"} {unread ? `- ${unread} new` : ""}
@@ -591,11 +749,25 @@ function Chat() {
 
                   <div className="flex items-center gap-2">
                     <button
+                      title={selectedMuted ? "Unmute chat" : "Mute chat"}
+                      onClick={() => toggleMute(selectedUser.id)}
+                      className={`grid h-10 w-10 place-items-center rounded-xl border ${themeClasses.panel} ${themeClasses.hover}`}
+                    >
+                      <BellOff size={18} className={selectedMuted ? "text-cyan-400" : ""} />
+                    </button>
+                    <button
                       title="Pin contact"
                       onClick={() => togglePin(selectedUser.id)}
                       className={`grid h-10 w-10 place-items-center rounded-xl border ${themeClasses.panel} ${themeClasses.hover}`}
                     >
                       {pinnedUsers.includes(String(selectedUser.id)) ? <PinOff size={18} /> : <Pin size={18} />}
+                    </button>
+                    <button
+                      title="Chat info"
+                      onClick={() => setShowInfoPanel((value) => !value)}
+                      className={`grid h-10 w-10 place-items-center rounded-xl border ${themeClasses.panel} ${themeClasses.hover}`}
+                    >
+                      <Info size={18} />
                     </button>
                     <div className={`hidden items-center gap-2 rounded-xl border px-3 py-2 sm:flex ${themeClasses.panel}`}>
                       {isReadBySelected ? <CheckCheck size={16} className="text-cyan-400" /> : <Check size={16} />}
@@ -620,13 +792,43 @@ function Chat() {
                 </div>
               </header>
 
-              <section className="flex-1 overflow-y-auto p-4">
+              {showInfoPanel && (
+                <section className={`border-b p-4 ${themeClasses.side}`}>
+                  <div className="mx-auto grid max-w-4xl gap-3 md:grid-cols-4">
+                    <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
+                      <p className={`text-xs ${themeClasses.muted}`}>Status</p>
+                      <p className="mt-1 text-sm font-bold">{activeIsOnline ? "Online" : "Offline"}</p>
+                    </div>
+                    <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
+                      <p className={`text-xs ${themeClasses.muted}`}>Starred</p>
+                      <p className="mt-1 text-sm font-bold">{selectedStarredCount} messages</p>
+                    </div>
+                    <div className={`rounded-2xl border p-3 ${themeClasses.panel}`}>
+                      <p className={`text-xs ${themeClasses.muted}`}>Shared files</p>
+                      <p className="mt-1 text-sm font-bold">{selectedSharedItemsCount} items</p>
+                    </div>
+                    <button
+                      onClick={() => setWallpaper(wallpaper === "plain" ? "pattern" : "plain")}
+                      className={`rounded-2xl border p-3 text-left ${themeClasses.panel} ${themeClasses.hover}`}
+                    >
+                      <p className={`text-xs ${themeClasses.muted}`}>Wallpaper</p>
+                      <p className="mt-1 text-sm font-bold">{wallpaper === "plain" ? "Plain" : "Pattern"}</p>
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              <section className={`flex-1 overflow-y-auto p-4 ${conversationBg}`}>
                 <div className="mx-auto flex max-w-4xl flex-col gap-3">
                   {visibleMessages.length ? (
                     visibleMessages.map((item, index) => {
                       const mine = String(item.sender_id) === String(userId);
                       const isRead = mine ? Boolean(item.read_status || item.read) : true;
                       const readStatus = mine ? (isRead ? "Seen" : "Sent") : "";
+                      const messageKey = getMessageKey(item);
+                      const parsed = parseReplyMessage(item.message);
+                      const reaction = messageReactions[messageKey];
+                      const isStarred = Boolean(starredMessages[messageKey]);
 
                       return (
                         <div
@@ -642,18 +844,63 @@ function Chat() {
                                   : "bg-white text-slate-900"
                             }`}
                           >
-                            <div className="whitespace-pre-wrap break-words text-sm leading-6">{item.message}</div>
+                            {parsed.replyMeta && (
+                              <div
+                                className={`mb-2 rounded-xl border-l-4 px-3 py-2 text-xs ${
+                                  mine
+                                    ? "border-slate-950/40 bg-slate-950/10"
+                                    : "border-cyan-400 bg-cyan-400/10"
+                                }`}
+                              >
+                                <p className="font-bold">{parsed.replyMeta.name}</p>
+                                <p className="mt-0.5 line-clamp-2 opacity-80">{parsed.replyMeta.text}</p>
+                              </div>
+                            )}
+                            <div className="whitespace-pre-wrap break-words text-sm leading-6">{parsed.body}</div>
+                            {(reaction || isStarred) && (
+                              <div className="mt-2 flex items-center gap-1">
+                                {reaction && (
+                                  <span className="rounded-full bg-white/30 px-2 py-0.5 text-xs">{reaction}</span>
+                                )}
+                                {isStarred && (
+                                  <span className="rounded-full bg-white/30 px-2 py-0.5 text-xs">
+                                    <Star size={12} className="inline fill-current" /> Starred
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             <div className="mt-2 flex items-center justify-between gap-4 text-[11px] opacity-70">
                               <span>{formatTime(item.created_at)}</span>
                               <div className="flex items-center gap-2">
                                 {mine && <span>{readStatus}</span>}
+                                <button title="Reply" onClick={() => beginReply(item, mine)}>
+                                  <MessageSquareReply size={13} />
+                                </button>
+                                <button title="Star message" onClick={() => toggleStar(item)}>
+                                  <Star size={13} className={isStarred ? "fill-current" : ""} />
+                                </button>
                                 <button title="Copy message" onClick={() => copyMessage(item.message)}>
                                   <Copy size={13} />
                                 </button>
                                 <button title="Hide message locally" onClick={() => hideMessage(item)}>
                                   <Trash2 size={13} />
                                 </button>
+                                <MoreVertical size={13} />
                               </div>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1 opacity-0 transition group-hover:opacity-100">
+                              {reactionOptions.map((option) => (
+                                <button
+                                  key={option}
+                                  title={`React ${option}`}
+                                  onClick={() => setReaction(item, option)}
+                                  className={`rounded-full px-2 py-0.5 text-xs ${
+                                    reaction === option ? "bg-white/40" : "bg-white/20"
+                                  }`}
+                                >
+                                  {option}
+                                </button>
+                              ))}
                             </div>
                           </div>
                         </div>
@@ -691,6 +938,18 @@ function Chat() {
                       </button>
                     ))}
                   </div>
+
+                  {replyTo && (
+                    <div className={`mb-2 flex items-center justify-between rounded-2xl border px-3 py-2 text-sm ${themeClasses.panel}`}>
+                      <div className="min-w-0">
+                        <p className="font-semibold">Replying to {replyTo.senderName}</p>
+                        <p className={`truncate text-xs ${themeClasses.muted}`}>{replyTo.preview}</p>
+                      </div>
+                      <button title="Cancel reply" onClick={() => setReplyTo(null)}>
+                        <X size={16} />
+                      </button>
+                    </div>
+                  )}
 
                   {pendingAttachment && (
                     <div className={`mb-2 flex items-center justify-between rounded-2xl border px-3 py-2 text-sm ${themeClasses.panel}`}>
